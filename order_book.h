@@ -206,6 +206,22 @@ class order_book
   static level_vector s_levels;
   sorted_levels_t m_bids;
   sorted_levels_t m_offers;
+
+  // Returns best bid price (0 if no bids)
+  int32_t best_bid() const {
+    return m_bids.empty() ? 0 : int32_t(m_bids.back().m_price);
+  }
+
+  // Returns best ask/offer price as a POSITIVE integer (0 if no offers)
+  int32_t best_ask() const {
+    return m_offers.empty() ? 0 : -int32_t(m_offers.back().m_price);
+  }
+
+  // Look up which book_idx an order_id_t belongs to (for E, C, X, D, U messages)
+  static uint16_t get_book_idx(order_id_t const oid) {
+    return uint16_t(oid_map.get(oid)->book_idx);
+  }
+
   using level_ptr_t = level_vector::__ptr;
 
   static void add_order(order_id_t const oid, book_id_t const book_idx,
@@ -266,7 +282,12 @@ class order_book
     printf("REDUCE %lu, %u\n", oid, qty);
 #endif  // TRACE
     order_t *order = oid_map.get(oid);
-    s_books[size_t(order->book_idx)].REDUCE_ORDER(order, qty);
+    order_book *book = &s_books[MKPRIMITIVE(order->book_idx)];
+    if (qty == order->m_qty) {
+      book->DELETE_ORDER(order);
+    } else {
+      book->REDUCE_ORDER(order, qty);
+    }
   }
   // shared between cancel(aka partial cancel aka reduce) and execute
   void REDUCE_ORDER(order_t *order, qty_t const qty)

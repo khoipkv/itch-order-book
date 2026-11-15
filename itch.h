@@ -208,17 +208,19 @@ struct itch_message<MSG::DELETE_ORDER> {
 using order_replace_t = itch_message<MSG::REPLACE_ORDER>;
 template <>
 struct itch_message<MSG::REPLACE_ORDER> {
-  itch_message(oid_t __old_oid, oid_t __new_oid, qty_t __q, price_t __p)
-      : oid(__old_oid), new_order_id(__new_oid), new_qty(__q), new_price(__p)
+  itch_message(oid_t __old_oid, oid_t __new_oid, qty_t __q, price_t __p, timestamp_t __t)
+      : oid(__old_oid), new_order_id(__new_oid), new_qty(__q), new_price(__p), timestamp(__t)
   {
   }
   oid_t const oid;
   oid_t const new_order_id;
   qty_t const new_qty;
   price_t const new_price;
+  timestamp_t const timestamp;
   static itch_message parse(char const *ptr)
   {
     return itch_message(read_oid(ptr + 11), read_oid(ptr + 19),
-                        read_qty(ptr + 27), read_price(ptr + 31));
+                        read_qty(ptr + 27), read_price(ptr + 31),
+                        read_timestamp(ptr + 5));
   }
 };

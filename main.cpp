@@ -36,25 +36,41 @@ static sprice_t mksigned(price_t price, BUY_SELL buy)
     break;                              \
   }
 
-int main()
+static inline void log_if_bbo_changed(FILE *fp, size_t npkts, uint64_t ts_ns,
+                                      uint16_t locate, int32_t old_bid,
+                                      int32_t old_ask, size_t &bbo_changes)
 {
+  int32_t new_bid = order_book::s_books[locate].best_bid();
+  int32_t new_ask = order_book::s_books[locate].best_ask();
+  if (new_bid != old_bid || new_ask != old_ask) {
+    ++bbo_changes;
+    fprintf(fp, "%lu,%lu,%u,%d,%d\n", npkts, ts_ns, locate, new_bid, new_ask);
+  }
+}
+
+int main(int argc, char **argv)
+{
+  const char *csv_path = (argc > 1) ? argv[1] : "reference_best_prices.csv";
+  FILE *ref_fp = fopen(csv_path, "w");
+  if (!ref_fp) {
+    perror("Failed to open output CSV");
+    return 1;
+  }
+  fprintf(ref_fp, "pkt_num,timestamp_ns,stock_locate,best_bid_price,best_ask_price\n");
+
   buf_t buf(1024);
   buf.fd = STDIN_FILENO;
   std::chrono::steady_clock::time_point start;
   size_t npkts = 0;
-#define BUILD_BOOK 1
-#if !BUILD_BOOK
-  size_t nadds(0);
-  uint64_t maxoid(0);
-#else
-  // order_book::oid_map.max_load_factor(0.5);
+  size_t bbo_changes = 0;
+
   order_book::oid_map.reserve(order_id_t(184118975 * 2));  // the first number
                                                            // is the empirically
                                                            // largest oid seen.
                                                            // multiply by 2 for
                                                            // good measure
-#endif
-  printf("%lu\n", sizeof(order_book) * order_book::MAX_BOOKS);
+  printf("Allocated books bytes: %lu\n", sizeof(order_book) * order_book::MAX_BOOKS);
+
   while (is_ok(buf.ensure(3))) {
     if (npkts) ++npkts;
     itch_t const msgtype = itch_t(*buf.get(2));
@@ -82,67 +98,78 @@ int main()
         auto const pkt = PROCESS<itch_t::ADD_ORDER>::read_from(&buf);
         assert(uint64_t(pkt.oid) <
                uint64_t(std::numeric_limits<int32_t>::max()));
-#if BUILD_BOOK
-        order_book::add_order(order_id_t(pkt.oid), book_id_t(pkt.stock_locate),
+        uint16_t loc = pkt.stock_locate;
+        int32_t old_bid = order_book::s_books[loc].best_bid();
+        int32_t old_ask = order_book::s_books[loc].best_ask();
+        order_book::add_order(order_id_t(pkt.oid), book_id_t(loc),
                               mksigned(pkt.price, pkt.buy), pkt.qty);
-#else
-        int64_t oid = int64_t(pkt.oid);
-        maxoid = maxoid > uint64_t(pkt.oid) ? maxoid : uint64_t(pkt.oid);
-        // printf("oid:%lu, nadds:%lu, npkts:%lu, %lu, %lu, %f, %f\n", oid,
-        // nadds, npkts, maxoid, oid - (int64_t)npkts, oid / (double)nadds, oid
-        // / (double)npkts);
-        ++nadds;
-#endif
+        log_if_bbo_changed(ref_fp, npkts, uint64_t(pkt.timestamp), loc,
+                           old_bid, old_ask, bbo_changes);
         break;
       }
       case (itch_t::ADD_ORDER_MPID): {
         auto const pkt = PROCESS<itch_t::ADD_ORDER_MPID>::read_from(&buf);
-#if BUILD_BOOK
+        uint16_t loc = pkt.add_msg.stock_locate;
+        int32_t old_bid = order_book::s_books[loc].best_bid();
+        int32_t old_ask = order_book::s_books[loc].best_ask();
         order_book::add_order(
-            order_id_t(pkt.add_msg.oid), book_id_t(pkt.add_msg.stock_locate),
+            order_id_t(pkt.add_msg.oid), book_id_t(loc),
             mksigned(pkt.add_msg.price, pkt.add_msg.buy), pkt.add_msg.qty);
-#else
-        ++nadds;
-#endif
+        log_if_bbo_changed(ref_fp, npkts, uint64_t(pkt.add_msg.timestamp), loc,
+                           old_bid, old_ask, bbo_changes);
         break;
       }
       case (itch_t::EXECUTE_ORDER): {
         auto const pkt = PROCESS<itch_t::EXECUTE_ORDER>::read_from(&buf);
-#if BUILD_BOOK
+        uint16_t loc = order_book::get_book_idx(order_id_t(pkt.oid));
+        int32_t old_bid = order_book::s_books[loc].best_bid();
+        int32_t old_ask = order_book::s_books[loc].best_ask();
         order_book::execute_order(order_id_t(pkt.oid), pkt.qty);
-#endif
+        log_if_bbo_changed(ref_fp, npkts, uint64_t(pkt.timestamp), loc,
+                           old_bid, old_ask, bbo_changes);
         break;
       }
       case (itch_t::EXECUTE_ORDER_WITH_PRICE): {
         auto const pkt =
             PROCESS<itch_t::EXECUTE_ORDER_WITH_PRICE>::read_from(&buf);
-#if BUILD_BOOK
+        uint16_t loc = order_book::get_book_idx(order_id_t(pkt.exec.oid));
+        int32_t old_bid = order_book::s_books[loc].best_bid();
+        int32_t old_ask = order_book::s_books[loc].best_ask();
         order_book::execute_order(order_id_t(pkt.exec.oid), pkt.exec.qty);
-#endif
+        log_if_bbo_changed(ref_fp, npkts, uint64_t(pkt.exec.timestamp), loc,
+                           old_bid, old_ask, bbo_changes);
         break;
       }
       case (itch_t::REDUCE_ORDER): {
         auto const pkt = PROCESS<itch_t::REDUCE_ORDER>::read_from(&buf);
-#if BUILD_BOOK
+        uint16_t loc = order_book::get_book_idx(order_id_t(pkt.oid));
+        int32_t old_bid = order_book::s_books[loc].best_bid();
+        int32_t old_ask = order_book::s_books[loc].best_ask();
         order_book::cancel_order(order_id_t(pkt.oid), pkt.qty);
-#endif
+        log_if_bbo_changed(ref_fp, npkts, uint64_t(pkt.timestamp), loc,
+                           old_bid, old_ask, bbo_changes);
         break;
       }
       case (itch_t::DELETE_ORDER): {
         auto const pkt = PROCESS<itch_t::DELETE_ORDER>::read_from(&buf);
-#if BUILD_BOOK
+        uint16_t loc = order_book::get_book_idx(order_id_t(pkt.oid));
+        int32_t old_bid = order_book::s_books[loc].best_bid();
+        int32_t old_ask = order_book::s_books[loc].best_ask();
         order_book::delete_order(order_id_t(pkt.oid));
-#endif
+        log_if_bbo_changed(ref_fp, npkts, uint64_t(pkt.timestamp), loc,
+                           old_bid, old_ask, bbo_changes);
         break;
       }
       case (itch_t::REPLACE_ORDER): {
         auto const pkt = PROCESS<itch_t::REPLACE_ORDER>::read_from(&buf);
-#if BUILD_BOOK
+        uint16_t loc = order_book::get_book_idx(order_id_t(pkt.oid));
+        int32_t old_bid = order_book::s_books[loc].best_bid();
+        int32_t old_ask = order_book::s_books[loc].best_ask();
         order_book::replace_order(order_id_t(pkt.oid),
                                   order_id_t(pkt.new_order_id), pkt.new_qty,
                                   mksigned(pkt.new_price, BUY_SELL::BUY));
-#endif
-        // actually it will get re-signed inside. code smell
+        log_if_bbo_changed(ref_fp, npkts, uint64_t(pkt.timestamp), loc,
+                           old_bid, old_ask, bbo_changes);
         break;
       }
       default: {
@@ -152,13 +179,11 @@ int main()
       }
     }
   }
-#if !BUILD_BOOK
-  printf("%lu adds\n", nadds);
-  printf("maxoid %lu\n", maxoid);
-#endif
+
+  fclose(ref_fp);
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
   size_t nanos =
       std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-  printf("%lu packets in %lu nanos , %.2f nanos per packet \n", npkts, nanos,
-         nanos / (double)npkts);
+  printf("%lu packets in %lu nanos , %.2f nanos per packet (BBO changes: %lu)\n",
+         npkts, nanos, nanos / (double)npkts, bbo_changes);
 }
