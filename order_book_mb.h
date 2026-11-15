@@ -91,8 +91,9 @@ class oid_hashtable
 
   slot_t *m_slots;
   size_t m_count;
+  size_t m_peak;  // max simultaneous live orders seen (for sizing)
 
-  oid_hashtable() : m_count(0)
+  oid_hashtable() : m_count(0), m_peak(0)
   {
     m_slots = new slot_t[CAPACITY]();  // Zero-initialized (all keys = 0)
   }
@@ -119,8 +120,11 @@ class oid_hashtable
       idx = (idx + 1) & MASK;
     }
     if (m_slots[idx].key == 0) {
+      // Keep at least one empty slot, otherwise get()/insert() never terminate
+      assert(m_count < CAPACITY - 1);
       m_slots[idx].key = k;
       ++m_count;
+      if (m_count > m_peak) m_peak = m_count;
     }
     return &m_slots[idx].val;
   }

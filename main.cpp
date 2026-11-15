@@ -4,7 +4,13 @@
 #include <memory>
 #include "bufferedreader.h"
 #include "itch.h"
+
+// Added the header for the fixed-size hash-table book
+#ifdef ORDER_BOOK_MB
+#include "order_book_mb.h"
+#else
 #include "order_book.h"
+#endif
 
 template <itch_t __code>
 class PROCESS
@@ -186,4 +192,10 @@ int main(int argc, char **argv)
       std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
   printf("%lu packets in %lu nanos , %.2f nanos per packet (BBO changes: %lu)\n",
          npkts, nanos, nanos / (double)npkts, bbo_changes);
+#ifdef ORDER_BOOK_MB
+  printf("Hash table: peak live orders %lu / %lu slots (%.1f%% load), %lu live at end\n",
+         order_book::oid_map.m_peak, order_book::oid_map.CAPACITY,
+         100.0 * order_book::oid_map.m_peak / order_book::oid_map.CAPACITY,
+         order_book::oid_map.m_count);
+#endif
 }
