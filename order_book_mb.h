@@ -9,7 +9,6 @@
 
 enum class sprice_t : int32_t {};
 bool constexpr is_bid(sprice_t const x) { return int32_t(x) >= 0; }
-
 #define MEMORY_DEFS    \
   using __ptr = ptr_t; \
   using size_t__ = typename std::underlying_type<ptr_t>::type;
@@ -89,14 +88,14 @@ class oid_hashtable
     T val;
   };
 
-  slot_t *m_slots;
+  // Stored inline so the single static instance (order_book::oid_map) lands
+  // in .bss: zeroed by the C runtime at boot, no 8 MB heap allocation needed.
+  // Never create an oid_hashtable on the stack.
+  slot_t m_slots[CAPACITY];
   size_t m_count;
   size_t m_peak;  // max simultaneous live orders seen (for sizing)
 
-  oid_hashtable() : m_count(0), m_peak(0)
-  {
-    m_slots = new slot_t[CAPACITY]();  // Zero-initialized (all keys = 0)
-  }
+  oid_hashtable() : m_count(0), m_peak(0) {}
 
   static inline size_t hash_oid(uint32_t k)
   {
@@ -321,6 +320,6 @@ class order_book
   }
 };
 
-oid_hashtable<order_t> order_book::oid_map = oid_hashtable<order_t>();
+oid_hashtable<order_t> order_book::oid_map;  // default-init: no 8 MB temporary
 order_book *order_book::s_books = new order_book[order_book::MAX_BOOKS];
 order_book::level_vector order_book::s_levels = order_book::level_vector();

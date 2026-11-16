@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 #include <sys/types.h>
 
 enum class itch_t {
@@ -86,26 +87,21 @@ enum class timestamp_t : uint64_t {};
 enum class oid_t : uint64_t {};
 enum class price_t : uint32_t {};
 enum class qty_t : uint32_t {};
-static uint64_t read_eight(char const *src)
+// Big-endian field readers built from single-byte loads. ITCH fields sit at
+// arbitrary (often odd) offsets, and MicroBlaze either faults or silently
+// returns wrong data on unaligned word loads, so no pointer casts here.
+// This also avoids be64toh()/be32toh(), which newlib does not provide.
+static inline uint64_t read_be(char const *src, unsigned nbytes)
 {
-  return be64toh(*(uint64_t const *)src);
+  unsigned char const *p = (unsigned char const *)src;
+  uint64_t ret = 0;
+  for (unsigned i = 0; i < nbytes; ++i) ret = (ret << 8) | p[i];
+  return ret;
 }
-static uint64_t read_six(char const *src)
-{
-  uint64_t ret;
-  char *pun = (char *)&ret;
-  // it's not clear whether this is faster than six separate char assignments
-  memcpy(pun, src, 6);
-  return (be64toh(ret) >> 16);
-}
-static uint32_t read_four(char const *src)
-{
-  return be32toh(*(uint32_t const *)src);
-}
-static uint16_t read_two(char const *src)
-{
-  return be16toh(*(uint16_t const *)src);
-}
+static uint64_t read_eight(char const *src) { return read_be(src, 8); }
+static uint64_t read_six(char const *src) { return read_be(src, 6); }
+static uint32_t read_four(char const *src) { return uint32_t(read_be(src, 4)); }
+static uint16_t read_two(char const *src) { return uint16_t(read_be(src, 2)); }
 
 static timestamp_t read_timestamp(char const *src)
 {
